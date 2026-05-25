@@ -1,0 +1,17 @@
+# 大量图片帧数据
+video-vicon/data/
+
+# Python缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 视频文件
+*.mov
+*.MOV
+*.mp4
+*.avi
+
+# 系统文件
+.DS_Store
+Thumbs.db
