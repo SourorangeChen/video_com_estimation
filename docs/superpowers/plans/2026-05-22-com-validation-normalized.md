@@ -776,4 +776,3 @@ python validate_com_normalized.py
 # 安装依赖（如缺少）
 pip install numpy scipy matplotlib
 ```
-

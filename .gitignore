@@ -1,3 +1,6 @@
+# Claude 本地配置
+.claude/
+
 # 大量图片帧数据
 video-vicon/data/
 
