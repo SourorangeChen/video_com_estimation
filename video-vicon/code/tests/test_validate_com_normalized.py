@@ -141,3 +141,72 @@ def test_interpolate_vicon_to_video():
     video_t = np.array([0.05, 0.15, 0.25])
     result = interpolate_vicon_to_video(video_t, vicon_t, vicon_vals)
     np.testing.assert_allclose(result, [5.0, 15.0, 25.0], atol=1e-10)
+
+
+def test_compute_com_kinematics_uses_step_displacement_velocity_and_frame_height_for_xcom():
+    from validate_com_normalized import compute_com_kinematics
+
+    rows = compute_com_kinematics(
+        trial="WT_TEST",
+        frame_numbers=[10, 11, 12],
+        time_s=np.array([0.0, 1.0, 2.0]),
+        com_x_mm=np.array([1000.0, 2000.0, 3000.0]),
+        com_y_mm=np.array([0.0, 0.0, 0.0]),
+        com_z_mm=np.array([1000.0, 1000.0, 4000.0]),
+    )
+
+    assert rows[0]["trial"] == "WT_TEST"
+    assert rows[0]["frame"] == 10
+    assert rows[2]["time_s"] == 2.0
+
+    np.testing.assert_allclose(
+        [row["displacement_x_m"] for row in rows],
+        [0.0, 1.0, 1.0],
+        atol=1e-10,
+    )
+    np.testing.assert_allclose(
+        [row["displacement_m"] for row in rows],
+        [0.0, 1.0, np.sqrt(10.0)],
+        atol=1e-10,
+    )
+    np.testing.assert_allclose(
+        [row["velocity_x_m_s"] for row in rows],
+        [1.0, 1.0, 1.0],
+        atol=1e-10,
+    )
+    np.testing.assert_allclose(
+        [row["velocity_z_m_s"] for row in rows],
+        [0.0, 1.5, 3.0],
+        atol=1e-10,
+    )
+
+    expected_omega0 = np.sqrt(9.81 / np.array([1.0, 1.0, 4.0]))
+    np.testing.assert_allclose(
+        [row["omega0_rad_s"] for row in rows],
+        expected_omega0,
+        atol=1e-10,
+    )
+    np.testing.assert_allclose(
+        [row["xcom_x_m"] for row in rows],
+        np.array([1.0, 2.0, 3.0]) + (1.0 / expected_omega0),
+        atol=1e-10,
+    )
+    np.testing.assert_allclose(
+        [row["xcom_z_m"] for row in rows],
+        np.array([1.0, 1.0, 4.0]) + (np.array([0.0, 1.5, 3.0]) / expected_omega0),
+        atol=1e-10,
+    )
+
+
+def test_compute_com_kinematics_rejects_non_positive_frame_height():
+    from validate_com_normalized import compute_com_kinematics
+
+    with pytest.raises(ValueError, match="positive CoM height"):
+        compute_com_kinematics(
+            trial="WT_TEST",
+            frame_numbers=[1, 2],
+            time_s=np.array([0.0, 1.0]),
+            com_x_mm=np.array([0.0, 1.0]),
+            com_y_mm=np.array([0.0, 1.0]),
+            com_z_mm=np.array([1000.0, 0.0]),
+        )

@@ -14,10 +14,11 @@ from scipy.signal import detrend
 
 # Machine-specific paths for this research project (H:\COM on Windows)
 VICON_CSV_ROOT = Path(r"H:\COM\video-vicon\data\Chenzixuan\Vicon\rawdata\Chenzixuan_20260505_test")
-KEYPOINTS_JSON = Path(r"H:\COM\video-vicon\data\Chenzixuan\Video\Video_keypoint-com\results\keypoints.json")
+KEYPOINTS_JSON = Path(r"H:\COM\video-vicon\data\Chenzixuan\Video\Video_keypoint-com\results\keypoints_and_com.json")
 MANIFEST_CSV   = Path(r"H:\COM\video-vicon\data\Chenzixuan\Video\Video_trial\Video_ViconTrial_manifest.csv")
 VALIDATION_DIR = Path(r"H:\COM\video-vicon\validation")
 VIDEO_FPS      = 29.996
+GRAVITY_M_S2   = 9.81
 
 
 def remove_linear_drift(signal: np.ndarray) -> np.ndarray:
@@ -177,6 +178,87 @@ def interpolate_vicon_to_video(
     return np.interp(video_t, vicon_t, vicon_vals)
 
 
+def compute_com_kinematics(
+    trial: str,
+    frame_numbers: list[int],
+    time_s: np.ndarray,
+    com_x_mm: np.ndarray,
+    com_y_mm: np.ndarray,
+    com_z_mm: np.ndarray,
+) -> list[dict[str, Any]]:
+    """Compute Vicon CoM displacement, velocity, and xCoM.
+
+    Vicon exports CoM in millimeters. Kinematic outputs use meters and seconds.
+    Displacement is frame-to-frame: r(t_i) - r(t_{i-1}); the first frame is zero.
+    The inverted-pendulum length l(t) is the per-frame CoM height, i.e. com_z_m.
+    """
+    if not (len(frame_numbers) == len(time_s) == len(com_x_mm) == len(com_y_mm) == len(com_z_mm)):
+        raise ValueError("frame, time, and CoM arrays must have the same length")
+    if len(frame_numbers) < 2:
+        raise ValueError("at least two frames are required to compute velocity")
+
+    com_m = np.column_stack([com_x_mm, com_y_mm, com_z_mm]).astype(float) / 1000.0
+    if np.any(com_m[:, 2] <= 0.0):
+        raise ValueError("xCoM requires positive CoM height for every frame")
+
+    displacement = np.vstack([np.zeros(3), np.diff(com_m, axis=0)])
+    displacement_mag = np.linalg.norm(displacement, axis=1)
+    velocity = np.gradient(com_m, time_s, axis=0)
+    velocity_mag = np.linalg.norm(velocity, axis=1)
+    omega0 = np.sqrt(GRAVITY_M_S2 / com_m[:, 2])
+    xcom = com_m + velocity / omega0[:, np.newaxis]
+
+    rows: list[dict[str, Any]] = []
+    for idx, frame in enumerate(frame_numbers):
+        rows.append({
+            "trial": trial,
+            "frame": int(frame),
+            "time_s": float(time_s[idx]),
+            "com_x_m": float(com_m[idx, 0]),
+            "com_y_m": float(com_m[idx, 1]),
+            "com_z_m": float(com_m[idx, 2]),
+            "displacement_x_m": float(displacement[idx, 0]),
+            "displacement_y_m": float(displacement[idx, 1]),
+            "displacement_z_m": float(displacement[idx, 2]),
+            "displacement_m": float(displacement_mag[idx]),
+            "velocity_x_m_s": float(velocity[idx, 0]),
+            "velocity_y_m_s": float(velocity[idx, 1]),
+            "velocity_z_m_s": float(velocity[idx, 2]),
+            "velocity_m_s": float(velocity_mag[idx]),
+            "omega0_rad_s": float(omega0[idx]),
+            "xcom_x_m": float(xcom[idx, 0]),
+            "xcom_y_m": float(xcom[idx, 1]),
+            "xcom_z_m": float(xcom[idx, 2]),
+        })
+    return rows
+
+
+def compute_trial_kinematics(
+    trial: str,
+    manifest_row: dict[str, Any],
+    vicon_csv: Path,
+) -> list[dict[str, Any]]:
+    """Compute Vicon CoM kinematics for one trial."""
+    _, vicon_frames, vicon_cx, vicon_cy, vicon_cz = parse_vicon_model_outputs(vicon_csv)
+    if not vicon_frames:
+        print(f"[{trial}] WARNING: no Vicon COM records found for kinematics, skipping")
+        return []
+
+    time_s = build_vicon_time_axis(
+        vicon_frames,
+        manifest_row["first_frame"],
+        manifest_row["trajectory_rate_hz"],
+    )
+    return compute_com_kinematics(
+        trial=trial,
+        frame_numbers=vicon_frames,
+        time_s=time_s,
+        com_x_mm=np.array(vicon_cx),
+        com_y_mm=np.array(vicon_cy),
+        com_z_mm=np.array(vicon_cz),
+    )
+
+
 def plot_comparison(
     t: np.ndarray,
     video_z: np.ndarray,
@@ -241,6 +323,26 @@ def write_summary_csv(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = ["trial", "axis", "pearson_r", "p_value", "nrmse", "n_frames",
                   "xcorr_peak_r", "xcorr_lag_frames", "xcorr_lag_ms", "warning"]
+    with output_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def write_kinematics_csv(
+    rows: list[dict[str, Any]],
+    output_path: Path,
+) -> None:
+    """Write per-frame Vicon CoM kinematics rows to CSV."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "trial", "frame", "time_s",
+        "com_x_m", "com_y_m", "com_z_m",
+        "displacement_x_m", "displacement_y_m", "displacement_z_m", "displacement_m",
+        "velocity_x_m_s", "velocity_y_m_s", "velocity_z_m_s", "velocity_m_s",
+        "omega0_rad_s",
+        "xcom_x_m", "xcom_y_m", "xcom_z_m",
+    ]
     with output_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -363,20 +465,25 @@ def main() -> int:
     manifest = load_manifest(MANIFEST_CSV)
     plots_dir = VALIDATION_DIR / "plots_aligned"
     all_rows: list[dict[str, Any]] = []
+    all_kinematics_rows: list[dict[str, Any]] = []
 
     for trial, manifest_row in manifest.items():
         vicon_csv = VICON_CSV_ROOT / f"{trial}.csv"
         if not vicon_csv.exists():
             print(f"[{trial}] WARNING: CSV not found at {vicon_csv}, skipping")
             continue
+        all_kinematics_rows.extend(compute_trial_kinematics(trial, manifest_row, vicon_csv))
         rows = process_trial(trial, manifest_row, KEYPOINTS_JSON, vicon_csv, plots_dir)
         all_rows.extend(rows)
 
     summary_path = VALIDATION_DIR / "summary.csv"
     write_summary_csv(all_rows, summary_path)
+    kinematics_path = VALIDATION_DIR / "vicon_com_kinematics.csv"
+    write_kinematics_csv(all_kinematics_rows, kinematics_path)
     print(f"\nSummary saved to {summary_path}")
+    print(f"Vicon COM kinematics saved to {kinematics_path}")
     print(f"Plots saved to {plots_dir}")
-    return 0 if all_rows else 1
+    return 0 if all_rows and all_kinematics_rows else 1
 
 
 if __name__ == "__main__":
