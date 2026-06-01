@@ -10,6 +10,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.lines import Line2D
 
 from video_com_metric import KEYPOINTS_JSON, OUTPUT_CSV
 
@@ -18,6 +19,16 @@ TRIAL = "WT02"
 FRAME_COUNT = 50
 OUTPUT_DIR = Path(r"H:\COM\video-vicon\validation\WT02_first50_video_metrics_2d")
 VELOCITY_VECTOR_SECONDS = 0.05
+
+
+def add_side_legend(ax, loc: str, fontsize: int | None = None) -> None:
+    handles, labels = ax.get_legend_handles_labels()
+    handles.extend([
+        Line2D([0], [0], color="#2b8a3e", linewidth=2.0),
+        Line2D([0], [0], color="#c92a2a", linewidth=2.0),
+    ])
+    labels.extend(["left side", "right side"])
+    ax.legend(handles, labels, loc=loc, fontsize=fontsize)
 
 COCO_EDGES = [
     (5, 6),
@@ -203,7 +214,7 @@ def render_frame(
     ax.set_ylabel("video Y (px, downward)")
     ax.set_title(f"WT02 video front/back metrics | Frame {metric['frame']} | {index + 1}/{total}")
     ax.grid(True, alpha=0.25)
-    ax.legend(loc="lower right", fontsize=8)
+    add_side_legend(ax, loc="lower right", fontsize=8)
     fig.tight_layout()
     fig.savefig(output_path)
     plt.close(fig)

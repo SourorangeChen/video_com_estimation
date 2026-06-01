@@ -9,6 +9,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.lines import Line2D
 
 from vicon_skeleton_drawing import SKELETON_EDGES, parse_trajectories
 
@@ -22,6 +23,16 @@ OUTPUT_2D_DIR = ROOT / "validation" / "WT02_first50_kinematics_yz_2d"
 TRIAL = "WT02"
 FRAME_COUNT = 50
 VELOCITY_VECTOR_SECONDS = 0.05
+
+
+def add_side_legend(ax, loc: str, fontsize: int | None = None) -> None:
+    handles, labels = ax.get_legend_handles_labels()
+    handles.extend([
+        Line2D([0], [0], color="#2b8a3e", linewidth=2.0),
+        Line2D([0], [0], color="#c92a2a", linewidth=2.0),
+    ])
+    labels.extend(["left side", "right side"])
+    ax.legend(handles, labels, loc=loc, fontsize=fontsize)
 
 
 def load_trial_kinematics(csv_path: Path, trial: str) -> list[dict[str, Any]]:
@@ -125,6 +136,10 @@ def yz_limits_for_selection(selection: list[tuple[dict[str, Any], dict[str, Any]
     return (min(ys) - y_margin, max(ys) + y_margin), (min(zs) - z_margin, max(zs) + z_margin)
 
 
+def mirrored_y_limits(limits):
+    return (limits[0][1], limits[0][0]), limits[1]
+
+
 def render_frame_yz_2d(
     kin: dict[str, Any],
     trajectory_frame: dict[str, Any],
@@ -181,18 +196,20 @@ def render_frame_yz_2d(
     metric_text = (
         f"disp = {kin['displacement_m']:.4f} m\n"
         f"vel = {kin['velocity_m_s']:.3f} m/s\n"
+        f"l = {kin['com_z_m']:.3f} m\n"
         f"omega0 = {kin['omega0_rad_s']:.3f} rad/s\n"
         f"xCoM-CoM = {np.linalg.norm(xcom - com):.3f} m"
     )
     ax.text(0.02, 0.98, metric_text, transform=ax.transAxes, fontsize=10, va="top")
-    ax.set_xlim(*limits[0])
+    display_limits = mirrored_y_limits(limits)
+    ax.set_xlim(*display_limits[0])
     ax.set_ylim(*limits[1])
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("Y (m)")
+    ax.set_xlabel("Y (m, mirrored)")
     ax.set_ylabel("Z (m)")
     ax.set_title(f"WT02 front/back Y-Z view | Frame {kin['frame']} | {index + 1}/{total}")
     ax.grid(True, alpha=0.25)
-    ax.legend(loc="lower right", fontsize=8)
+    add_side_legend(ax, loc="lower right", fontsize=8)
     fig.tight_layout()
     fig.savefig(output_path)
     plt.close(fig)
@@ -213,10 +230,11 @@ def render_overview_yz_2d(selection: list[tuple[dict[str, Any], dict[str, Any]]]
     ax.plot(xcom_path[:, 0], xcom_path[:, 1], color="#ff7f0e", linewidth=2.0, label="xCoM path")
     ax.scatter(com_path[0, 0], com_path[0, 1], c="#1f77b4", s=65, label="start")
     ax.scatter(com_path[-1, 0], com_path[-1, 1], c="#d62728", s=65, label="end")
-    ax.set_xlim(*limits[0])
+    display_limits = mirrored_y_limits(limits)
+    ax.set_xlim(*display_limits[0])
     ax.set_ylim(*limits[1])
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("Y (m)")
+    ax.set_xlabel("Y (m, mirrored)")
     ax.set_ylabel("Z (m)")
     ax.set_title("WT02 first 50 matched Vicon frames | Y-Z front/back view")
     ax.grid(True, alpha=0.25)
@@ -276,6 +294,7 @@ def render_frame(
     metric_text = (
         f"disp = {kin['displacement_m']:.4f} m\n"
         f"vel = {kin['velocity_m_s']:.3f} m/s\n"
+        f"l = {kin['com_z_m']:.3f} m\n"
         f"omega0 = {kin['omega0_rad_s']:.3f} rad/s\n"
         f"xCoM-CoM = {np.linalg.norm(xcom - com):.3f} m"
     )
@@ -290,7 +309,7 @@ def render_frame(
     ax.set_ylabel("Y (m)")
     ax.set_zlabel("Z (m)")
     ax.set_title(f"WT02 Vicon CoM Metrics Example 2 | Frame {kin['frame']} | {index + 1}/{total}")
-    ax.legend(loc="upper right", fontsize=8)
+    add_side_legend(ax, loc="upper right", fontsize=8)
     ax.grid(True, alpha=0.25)
     fig.tight_layout()
     fig.savefig(output_path)

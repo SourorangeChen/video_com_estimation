@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Purpose
 
-This is a **biomechanics research validation pipeline** — not a software product. The goal is to validate video-based 2D center-of-mass (CoM) estimates (from iPhone + PCT pose estimation) against Vicon motion capture as a gold standard for gait and balance analysis.
+This is a **biomechanics research validation pipeline** — not a software product. The goal is to validate video-based 2D center-of-mass (CoM) estimates (from iPhone + PCT pose estimation) against Vicon motion capture as a gold standard for gait and balance analysis. The pipeline has expanded to also compute and compare full kinematic metrics: CoM velocity, extrapolated CoM (xCoM), pendulum length (l), and natural frequency (ω₀).
 
-Subject: Chenzixuan. Data lives in `com-vicon/data/Chenzixuan/`.
+Subject: Chenzixuan. Data lives in `video-vicon/data/Chenzixuan/`.
 
 ## Python Runtime
 
@@ -22,33 +22,49 @@ All scripts are standalone Python files. Run from the repo root:
 
 ```powershell
 # PCT keypoint inference (requires GPU + mmdet + PCT at H:\PCT)
-D:\Program\Anaconda3\python.exe com-vicon\code\video_pct_estimated.py --input-dir <path> --output-dir <path>
+D:\Program\Anaconda3\python.exe video-vicon\code\video_pct_estimated.py --input-dir <path> --output-dir <path>
 
-# Draw video CoM overlays from keypoints.json
-D:\Program\Anaconda3\python.exe com-vicon\code\video_estimated_com.py
+# Draw video CoM overlays from keypoints_and_com.json
+D:\Program\Anaconda3\python.exe video-vicon\code\video_estimated_com.py
 
 # Draw Vicon 3D skeleton frames from CSV
-D:\Program\Anaconda3\python.exe com-vicon\code\vicon_skeleton_drawing.py
+D:\Program\Anaconda3\python.exe video-vicon\code\vicon_skeleton_drawing.py
 
-# Validate CoM (video vs Vicon gold-standard): outputs com_correlation.csv + xcorr plots
+# Validate CoM (video vs Vicon gold-standard):
+#   outputs validation/summary.csv + validation/plots_aligned/ PNGs
+#   also outputs validation/vicon_com_metric.csv (per-frame Vicon CoM kinematics)
 D:\Program\Anaconda3\python.exe video-vicon\code\validate_com_normalized.py
 
-# Validate COCO-17 keypoints (video vs Vicon trajectories): outputs keypoints_correlation.csv + xcorr plots
+# Validate COCO-17 keypoints (video vs Vicon Trajectories):
+#   outputs validation/keypoint_summary.csv + validation/keypoint_plots/{kp_name}/{trial}_{axis}.png
 D:\Program\Anaconda3\python.exe video-vicon\code\validate_keypoints_normalized.py
 
-# Add keypoint-to-Vicon mapping labels onto existing xcorr PNGs (run after regenerating plots)
-D:\Program\Anaconda3\python.exe video-vicon\validation\add_labels_to_xcorr_plots.py
+# Annotate keypoints_xcorr PNGs with COCO→Vicon mapping labels (overwrites in-place)
+D:\Program\Anaconda3\python.exe video-vicon\code\add_labels_to_xcorr_plots.py
 
-# Compute CoM from ankle JSON (separate patient dataset H:\Camera_data)
-D:\Program\Anaconda3\python.exe calculate_com.py <patient_name>
+# Compute per-frame video kinematic metrics (vel, xCoM, l, ω₀) from keypoints_and_com.json
+#   outputs validation/video_com_metric.csv
+D:\Program\Anaconda3\python.exe video-vicon\code\video_com_metric.py
 
-# Plot CoM x-t and y-t timeseries (for H:\Camera_data patients)
-D:\Program\Anaconda3\python.exe plot_com_timeseries.py <patient_name>
-```
+# Plot WT02 Vicon CoM kinematics: 3D skeleton + CoM/xCoM vectors, first 50 frames
+#   reads validation/vicon_com_metric.csv + WT02.csv trajectories
+#   outputs validation/WT02_first50_kinematics_3d/ + validation/WT02_first50_kinematics_yz_2d/
+D:\Program\Anaconda3\python.exe video-vicon\code\plot_wt02_kinematics_3d.py
 
-Core reusable function (import directly rather than running the CLI):
-```python
-from calculate_com import compute_frame_com  # takes COCO keypoints list, returns {"com_x": float, "com_y": float} or None
+# Plot WT02 video CoM metrics: 2D keypoints + CoM/xCoM vectors, first 50 frames
+#   reads validation/video_com_metric.csv + keypoints_and_com.json
+#   outputs validation/WT02_first50_video_metrics_2d/
+D:\Program\Anaconda3\python.exe video-vicon\code\plot_wt02_video_metrics_2d.py
+
+# Plot WT02 time-aligned video vs Vicon side-by-side 2D frames (100 paired frames)
+#   reads both metric CSVs, aligns by time, outputs paired frame PNGs
+#   outputs validation/WT02_first100_video_metrics_2d/ + validation/WT02_first100_vicon_metrics_yz_2d/
+D:\Program\Anaconda3\python.exe video-vicon\code\plot_wt02_aligned_video_vicon_2d.py
+
+# Plot WT02 time-series comparison of video vs Vicon kinematics (100 paired frames)
+#   reads both metric CSVs via build_aligned_selections()
+#   outputs validation/WT02_first100_aligned_timeseries/ (CSV + 4 PNGs)
+D:\Program\Anaconda3\python.exe video-vicon\code\plot_wt02_aligned_timeseries.py
 ```
 
 ## Architecture
@@ -62,20 +78,27 @@ iPhone MOV → [FFmpeg cut by Vicon trial timing] → per-trial video segments
                                         mmdet person detection + PCT pose
                                                          ↓
                                          keypoints_and_com.json (COCO-style)
+                                           image paths: Video_{trial}_Trajectory/
                                                          ↓
-                                 ┌───────────────────────┴──────────────────────┐
-                      [video_estimated_com.py]                  [validate_keypoints_normalized.py]
-                  compute_frame_com() → blue dot            COCO-17 vs Vicon Trajectories
-                  com_estimated_frames/ images               keypoints_xcorr/ plots
-                                                            keypoints_correlation.csv
-                                 └───────────────────────┬──────────────────────┘
+                         ┌───────────────────────────────┴──────────────────────────────┐
+              [video_estimated_com.py]          [validate_keypoints_normalized.py]   [video_com_metric.py]
+          compute_frame_com() → blue dot     COCO-17 vs Vicon Trajectories         vel, xCoM, l, ω₀
+          video_com_pred/ images             keypoint_plots/{kp_name}/{trial}_{axis}.png  video_com_metric.csv
+                                             keypoint_summary.csv
+                         └───────────────────────────────┬──────────────────────────────┘
                                                          ↓
                                            [validate_com_normalized.py]
                                    video CoM vs Vicon Model Outputs CentreOfMass
-                                          com_xcorr/ plots
-                                          com_correlation.csv
+                                          plots_aligned/ PNGs
+                                          summary.csv
+                                          vicon_com_metric.csv  ← per-frame Vicon kinematics
 
 Vicon CSV (multi-section) → [vicon_skeleton_drawing.py] → 3D skeleton PNGs
+
+vicon_com_metric.csv + WT02.csv → [plot_wt02_kinematics_3d.py] → WT02_first50_kinematics_3d/ + _yz_2d/
+video_com_metric.csv + keypoints_and_com.json → [plot_wt02_video_metrics_2d.py] → WT02_first50_video_metrics_2d/
+both metric CSVs → [plot_wt02_aligned_video_vicon_2d.py] → WT02_first100_video_metrics_2d/ + _vicon_metrics_yz_2d/
+both metric CSVs → [plot_wt02_aligned_timeseries.py] → WT02_first100_aligned_timeseries/ (CSV + 4 PNGs)
 ```
 
 ### 7-Segment Anthropometric Model (`compute_frame_com`)
@@ -89,29 +112,50 @@ Defined in `com_drawing/calculate_com.py` (and also `calculate_com.py` at repo r
 | left/right foot+leg | 0.061 | 0.606 |
 | left/right thigh | 0.100 | 0.433 |
 
+### Kinematic Metrics Model
+
+Computed in `video_com_metric.py` (video) and `validate_com_normalized.py` (Vicon). Key quantities:
+
+- **pixels_per_meter** (video only): nose-to-ankle pixel height / `REFERENCE_HEIGHT_M` (1.70 m), computed per-frame
+- **l**: CoM height above ground — video: `(ground_y_px − com_y_px) / pixels_per_meter`; Vicon: `com_z_m`
+- **ω₀**: `sqrt(g / l)` — natural frequency of inverted pendulum
+- **xCoM** (extrapolated CoM): `CoM_pos + velocity / ω₀` — Hof et al. margin-of-stability model
+- **velocity**: video uses finite differences × fps; Vicon uses `np.gradient`
+
+Sign conventions for video: pixel Y increases downward; `com_y_m_up = −com_y_px / pixels_per_meter`; displacement/velocity upward components are sign-flipped accordingly.
+
 ### Script Responsibilities
 
 | Script | Inputs | Outputs | Path assumptions |
 |---|---|---|---|
-| `video_pct_estimated.py` | image folders | `keypoints.json` + annotated JPGs | defaults to `H:\VICON\...` — pass explicit `--input-dir`/`--output-dir` |
-| `video_estimated_com.py` | `keypoints.json` + raw frames | `com_estimated_frames/` images | `PCT_RESULTS_ROOT` is set relative to `__file__` — needs path fix for current data layout |
-| `vicon_skeleton_drawing.py` | Vicon CSV | PNG frames per frame | `CSV_PATH` hardcoded to `ROOT/Chenzixuan_20260505_test/WT02.csv` — update before use |
-| `validate_com_normalized.py` | `keypoints.json` + Vicon CSV + manifest | `com_correlation.csv` + `com_xcorr/` PNGs | paths hardcoded to `H:\COM\video-vicon\...` |
-| `validate_keypoints_normalized.py` | `keypoints_and_com.json` + Vicon CSV + manifest | `keypoints_correlation.csv` + `keypoints_xcorr/` PNGs | paths hardcoded to `H:\COM\video-vicon\...` |
-| `add_labels_to_xcorr_plots.py` | `keypoints_xcorr/` PNGs | overwrites same PNGs with added label strip | reads from `validation/keypoints_xcorr/` relative to script location |
-| `calculate_com.py` (CLI) | `H:\Camera_data` Excel + JSON | `_COM.json` + overlay images | hardcoded to `H:\Camera_data` — only the `compute_frame_com()` function is portable |
-| `plot_com_timeseries.py` (CLI) | `_COM.json` | `_x_t.png`, `_y_t.png` | hardcoded to `H:\Camera_data` |
+| `video_pct_estimated.py` | image folders | `keypoints_and_com.json` + annotated JPGs | defaults to `H:\VICON\...` — pass explicit `--input-dir`/`--output-dir` |
+| `video_estimated_com.py` | `keypoints_and_com.json` + raw frames | `video_com_pred/` images | `PCT_RESULTS_ROOT` set relative to `__file__` |
+| `vicon_skeleton_drawing.py` | Vicon CSV | PNG frames per frame | `CSV_PATH` hardcoded to `ROOT/Chenzixuan_20260505_test/WT02.csv` |
+| `validate_com_normalized.py` | `keypoints_and_com.json` + Vicon CSV + manifest | `summary.csv` + `plots_aligned/` PNGs + `vicon_com_metric.csv` | paths hardcoded to `H:\COM\video-vicon\...` |
+| `validate_keypoints_normalized.py` | `keypoints_and_com.json` + Vicon CSV + manifest | `keypoint_summary.csv` + `keypoint_plots/{kp_name}/{trial}_{axis}.png` | paths hardcoded to `H:\COM\video-vicon\...` |
+| `add_labels_to_xcorr_plots.py` | `validation/keypoints_xcorr/` PNGs | same PNGs annotated in-place | path relative to `__file__` |
+| `video_com_metric.py` | `keypoints_and_com.json` | `validation/video_com_metric.csv` | paths hardcoded to `H:\COM\video-vicon\...` |
+| `plot_wt02_kinematics_3d.py` | `vicon_com_metric.csv` + `WT02.csv` | `WT02_first50_kinematics_3d/` + `WT02_first50_kinematics_yz_2d/` | paths hardcoded to `H:\COM\video-vicon\...` |
+| `plot_wt02_video_metrics_2d.py` | `video_com_metric.csv` + `keypoints_and_com.json` | `WT02_first50_video_metrics_2d/` | paths hardcoded to `H:\COM\video-vicon\...` |
+| `plot_wt02_aligned_video_vicon_2d.py` | both metric CSVs + keypoints JSON + WT02.csv | `WT02_first100_video_metrics_2d/` + `WT02_first100_vicon_metrics_yz_2d/` | paths hardcoded to `H:\COM\video-vicon\...` |
+| `plot_wt02_aligned_timeseries.py` | (delegates to `build_aligned_selections()`) | `WT02_first100_aligned_timeseries/` CSV + 4 PNGs | paths hardcoded to `H:\COM\video-vicon\...` |
 
 ### Data Layout
 
 ```
 video-vicon/
   code/
-    validate_com_normalized.py          ← video CoM vs Vicon CentreOfMass
+    validate_com_normalized.py          ← video CoM vs Vicon CentreOfMass; writes vicon_com_metric.csv
     validate_keypoints_normalized.py    ← COCO-17 keypoints vs Vicon Trajectories
     vicon_skeleton_drawing.py
     video_pct_estimated.py
     video_estimated_com.py
+    video_com_metric.py                 ← per-frame video kinematic metrics (vel, xCoM, l, ω₀)
+    plot_wt02_kinematics_3d.py          ← WT02 Vicon 3D/YZ skeleton + CoM/xCoM vectors
+    plot_wt02_video_metrics_2d.py       ← WT02 video 2D keypoints + CoM/xCoM vectors
+    plot_wt02_aligned_video_vicon_2d.py ← WT02 time-aligned video+Vicon side-by-side 2D frames
+    plot_wt02_aligned_timeseries.py     ← WT02 video vs Vicon kinematic time-series comparison
+    add_labels_to_xcorr_plots.py        ← annotates keypoints_xcorr/ PNGs with mapping labels
     tests/
   data/Chenzixuan/
     Vicon/
@@ -125,26 +169,38 @@ video-vicon/
       Video_keypoint-com/
         results/
           keypoints.json                ← legacy (1028 records, all person_id=0)
-          keypoints_and_com.json        ← current (includes computed CoM per frame)
-          <Video_WTXX_Trajectory>/
-            raw_frames/
-            com_estimated_frames/
+          keypoints_and_com.json        ← current; image paths use Video_{trial}_Trajectory/
+          <Video_WTXX_pred>/
+            video_pct_pred/             ← raw frames extracted from trial video
+            video_com_pred/             ← frames with CoM overlay drawn
   validation/
-    com_correlation.csv                 ← per-trial CoM validation metrics
-    keypoints_correlation.csv           ← per-trial per-keypoint validation metrics
-    com_xcorr/                          ← CoM xcorr plots (x and z axes)
-    keypoints_xcorr/
-      kpNN_<name>/                      ← xcorr plots per COCO keypoint (x and z axes)
-    add_labels_to_xcorr_plots.py        ← utility: adds Video/Vicon name labels to PNGs
+    summary.csv                         ← per-trial CoM validation metrics (Pearson r, nRMSE, xcorr)
+    keypoint_summary.csv                ← per-trial per-keypoint validation metrics
+    com_correlation.csv                 ← updated/renamed version of summary.csv
+    keypoints_correlation.csv           ← updated/renamed version of keypoint_summary.csv
+    video_com_metric.csv                ← per-frame video kinematic metrics (all trials)
+    vicon_com_metric.csv                ← per-frame Vicon CoM kinematics (all trials)
+    plots_aligned/                      ← CoM lag-aligned z-score overlay plots ({trial}_{axis}.png)
+    com_z-score_detrend/                ← CoM z-score detrended overlay plots (newer run)
+    com_z-score_detrend_xcorr/          ← CoM xcorr-aligned plots (newer run)
+    keypoint_plots/                     ← per-keypoint validation plots (older)
+    keypoints_xcorr/                    ← per-keypoint xcorr-aligned plots (newer run)
+      kpNN_<name>/                      ← one plot per trial per axis, annotated with mapping label
+    WT02_first50_kinematics_3d/         ← Vicon 3D skeleton + CoM/xCoM per frame
+    WT02_first50_kinematics_yz_2d/      ← Vicon YZ front-view 2D per frame
+    WT02_first50_video_metrics_2d/      ← video 2D keypoints + CoM/xCoM per frame
+    WT02_first100_video_metrics_2d/     ← time-aligned video 2D frames (100 pairs)
+    WT02_first100_vicon_metrics_yz_2d/  ← time-aligned Vicon YZ frames (100 pairs)
+    WT02_first100_aligned_timeseries/   ← time-series CSV + 4 comparison PNGs
 ```
 
 Trial naming: `WT02`, `WT06`–`WT10`, `WTFAST11`, `WTFAST14`, `WTFAST18`–`WTFAST22`.  
-WT02 uses older folder names `video_pct_estimated/` and `video_com_estimated/` instead of the standard `raw_frames/` and `com_estimated_frames/`.
+All trial result folders follow the naming `Video_WTXX_pred/`.
 
 ## Critical Constraints
 
 **Two coordinate systems — never mix without explicit conversion:**
-- Video CoM: 2D pixel coordinates (origin top-left)
+- Video CoM: 2D pixel coordinates (origin top-left, Y increases downward)
 - Vicon CoM: 3D world coordinates in millimeters
 
 **Three timelines — always label which one you're on:**
@@ -160,6 +216,12 @@ WT02 uses older folder names `video_pct_estimated/` and `video_com_estimated/` i
 **Vicon CSV format:** Multi-section (Devices / Model Outputs / Trajectories). `parse_trajectories()` in `vicon_skeleton_drawing.py` shows the correct parsing approach — skip to the `Trajectories` section header, then read rate, marker names, axis labels, units, then data rows starting at offset +5.
 
 **Do not overwrite:** raw frames, raw Vicon CSV files, or `.xcp` files without backing up first.
+
+**keypoints_and_com.json image path format:** Current format uses `Video_{trial}_Trajectory/{stem}_{frame:04d}.jpg`. The legacy format `Video_{trial}_pred/video_pct_pred/` is no longer used.
+
+**vicon_com_metric.csv columns:** `trial, frame, time_s, com_x_m, com_y_m, com_z_m, displacement_{x,y,z}_m, displacement_m, velocity_{x,y,z}_m_s, velocity_m_s, omega0_rad_s, xcom_{x,y,z}_m`
+
+**video_com_metric.csv columns:** `trial, frame, time_s, pixels_per_meter, reference_height_m, nose_to_ankle_height_px, nose_y_px, ground_y_px, com_{x,y}_px, com_x_m, com_y_m_up, l_px, l_m, displacement_{x,y}_px, displacement_{x,y_m_up}_m, displacement_m, velocity_{x,y_m_s_up}_m_s, velocity_m_s, omega0_rad_s, xcom_{x,y}_m, xcom_{x,y}_px`
 
 ### COCO-17 → Vicon Marker Mapping
 
@@ -187,8 +249,37 @@ Defined in `validate_keypoints_normalized.py`. Used for keypoint-level validatio
 
 Sign alignment: `video_x ↔ −Vicon_Y`，`video_y ↔ −Vicon_Z`（video Y 向下，Vicon Z 向上）。
 
+## Validation Pipeline (validate_com_normalized.py / validate_keypoints_normalized.py)
+
+Both scripts follow the same processing steps per trial per axis:
+
+1. **Time alignment** — Vicon 250Hz linearly interpolated onto video ~30Hz time points (`np.interp`)
+2. **Sign alignment** — `vicon_Y_aligned = -vicon_Y`，`vicon_Z_aligned = -vicon_Z`
+3. **Linear detrend** — `scipy.signal.detrend(type="linear")` removes baseline drift from both signals
+4. **Z-score normalize** — zero mean, unit std; makes pixel and mm units comparable
+5. **Pearson r + nRMSE** — correlation and normalized error on z-scored signals
+6. **xcorr** — `np.correlate(full)` finds optimal lag; `lag<0` means Vicon leads video
+7. **Lag-aligned plot** — signals shifted by xcorr lag before plotting overlay
+
+Outputs per signal pair: `pearson_r`, `p_value`, `nrmse`, `n_frames`, `xcorr_peak_r`, `xcorr_lag_frames`, `xcorr_lag_ms`.
+
+## Kinematic Comparison Pipeline
+
+`plot_wt02_aligned_timeseries.py` compares these metrics between video and Vicon for WT02:
+
+| Metric | Video | Vicon |
+|---|---|---|
+| displacement per interval | `displacement_m` (finite diff) | `hypot(Δy, Δz)` between adjacent Vicon frames |
+| CoM velocity | `velocity_m_s` | `Δdisplacement / Δt` |
+| l (pendulum length) | `l_m` (CoM height above ankle) | `com_z_m` |
+| xCoM horizontal delta | `xcom_x_m − xcom_x_m[0]` | `−(xcom_y_m − xcom_y_m[0])` (axis flip) |
+| xCoM vertical delta | `xcom_y_m_up − xcom_y_m_up[0]` | `xcom_z_m − xcom_z_m[0]` |
+
+Axis alignment for xCoM comparison: `video_x ↔ −Vicon_Y`, `video_y_up ↔ Vicon_Z`.
+
 ## Open Research Questions
 
-1. ~~Where is Vicon gold-standard CoM?~~ → Resolved: parsed from `Model Outputs` section column `:CentreOfMass` (mm) in `validate_com_normalized.py`.
-2. Which camera view (front/back vs. side) determines which Vicon axis to compare against video X or Y — needs confirmation from recording setup notes.
+1. ~~Where is Vicon gold-standard CoM?~~ → Resolved: parsed from `Model Outputs` section column `:CentreOfMass` (mm).
+2. ~~Which Vicon axis maps to video X/Y?~~ → Resolved: camera faces Vicon −X direction (front view); `video_x ↔ Vicon_Y` (ML), `video_y ↔ Vicon_Z` (vertical), both signs flipped.
 3. Spatial comparison strategy: normalized 1D trend comparison (current approach) is the safe first pass; pixel-level comparison requires a validated Vicon→video projection.
+4. Kinematic metric comparison (xCoM, velocity, l): time-series comparison implemented in `plot_wt02_aligned_timeseries.py` for WT02 first 100 frames — extend to all trials pending result review.

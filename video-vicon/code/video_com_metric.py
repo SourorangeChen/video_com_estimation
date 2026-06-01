@@ -12,13 +12,29 @@ import numpy as np
 KEYPOINTS_JSON = Path(r"H:\COM\video-vicon\data\Chenzixuan\Video\Video_keypoint-com\results\keypoints_and_com.json")
 VALIDATION_DIR = Path(r"H:\COM\video-vicon\validation")
 OUTPUT_CSV = VALIDATION_DIR / "video_com_metric.csv"
+SMOOTHED_OUTPUT_CSV = VALIDATION_DIR / "video_com_metric_smoothed.csv"
 VIDEO_FPS = 29.996
 REFERENCE_HEIGHT_M = 1.70
 GRAVITY_M_S2 = 9.81
+SMOOTHING_WINDOW = 5
 
 NOSE = 0
 LEFT_ANKLE = 15
 RIGHT_ANKLE = 16
+
+
+def smooth_signal(values: np.ndarray, window: int = SMOOTHING_WINDOW) -> np.ndarray:
+    if window < 1 or window % 2 == 0:
+        raise ValueError("smoothing window must be a positive odd integer")
+    if len(values) < window:
+        return values.astype(float).copy()
+
+    values = values.astype(float)
+    half_window = window // 2
+    smoothed = values.copy()
+    kernel = np.ones(window) / window
+    smoothed[half_window:-half_window] = np.convolve(values, kernel, mode="valid")
+    return smoothed
 
 
 def parse_trial_and_frame(image_path: str) -> tuple[str, int] | None:
@@ -97,7 +113,7 @@ def compute_video_com_metrics(
     ])
     displacement_mag_m = np.linalg.norm(displacement_m, axis=1)
 
-    velocity_m_s = np.gradient(com_m, time_s, axis=0)
+    velocity_m_s = displacement_m * fps
     velocity_mag_m_s = np.linalg.norm(velocity_m_s, axis=1)
     omega0 = np.sqrt(GRAVITY_M_S2 / l_m)
     xcom_m = com_m + velocity_m_s / omega0[:, np.newaxis]
@@ -168,24 +184,32 @@ def load_video_trials(keypoints_json: Path) -> dict[str, list[dict[str, Any]]]:
     return dict(trials)
 
 
-def compute_all_video_metrics(keypoints_json: Path) -> list[dict[str, Any]]:
+def compute_all_video_metrics(keypoints_json: Path, smooth_com: bool = False) -> list[dict[str, Any]]:
     all_rows: list[dict[str, Any]] = []
     trials = load_video_trials(keypoints_json)
     for trial in sorted(trials):
         entries = sorted(trials[trial], key=lambda item: item["frame"])
         if len(entries) < 2:
             continue
-        all_rows.extend(
-            compute_video_com_metrics(
-                trial=trial,
-                frame_numbers=[entry["frame"] for entry in entries],
-                com_x_px=np.array([entry["com_x_px"] for entry in entries]),
-                com_y_px=np.array([entry["com_y_px"] for entry in entries]),
-                nose_y_px=np.array([entry["nose_y_px"] for entry in entries]),
-                left_ankle_y_px=np.array([entry["left_ankle_y_px"] for entry in entries]),
-                right_ankle_y_px=np.array([entry["right_ankle_y_px"] for entry in entries]),
-            )
+        com_x_px = np.array([entry["com_x_px"] for entry in entries])
+        com_y_px = np.array([entry["com_y_px"] for entry in entries])
+        if smooth_com:
+            com_x_px = smooth_signal(com_x_px)
+            com_y_px = smooth_signal(com_y_px)
+
+        rows = compute_video_com_metrics(
+            trial=trial,
+            frame_numbers=[entry["frame"] for entry in entries],
+            com_x_px=com_x_px,
+            com_y_px=com_y_px,
+            nose_y_px=np.array([entry["nose_y_px"] for entry in entries]),
+            left_ankle_y_px=np.array([entry["left_ankle_y_px"] for entry in entries]),
+            right_ankle_y_px=np.array([entry["right_ankle_y_px"] for entry in entries]),
         )
+        if smooth_com:
+            for row in rows:
+                row["com_smoothing_window"] = SMOOTHING_WINDOW
+        all_rows.extend(rows)
     return all_rows
 
 
@@ -203,6 +227,8 @@ def write_video_metric_csv(rows: list[dict[str, Any]], output_csv: Path) -> None
         "omega0_rad_s",
         "xcom_x_m", "xcom_y_m_up", "xcom_x_px", "xcom_y_px",
     ]
+    if rows and "com_smoothing_window" in rows[0]:
+        fieldnames.append("com_smoothing_window")
     with output_csv.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -211,10 +237,14 @@ def write_video_metric_csv(rows: list[dict[str, Any]], output_csv: Path) -> None
 
 def main() -> int:
     rows = compute_all_video_metrics(KEYPOINTS_JSON)
+    smoothed_rows = compute_all_video_metrics(KEYPOINTS_JSON, smooth_com=True)
     write_video_metric_csv(rows, OUTPUT_CSV)
+    write_video_metric_csv(smoothed_rows, SMOOTHED_OUTPUT_CSV)
     print(f"Output: {OUTPUT_CSV}")
+    print(f"Smoothed output: {SMOOTHED_OUTPUT_CSV}")
     print(f"Rows: {len(rows)}")
-    return 0 if rows else 1
+    print(f"Smoothed rows: {len(smoothed_rows)}")
+    return 0 if rows and smoothed_rows else 1
 
 
 if __name__ == "__main__":

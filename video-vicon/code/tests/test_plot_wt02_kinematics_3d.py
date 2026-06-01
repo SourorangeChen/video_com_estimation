@@ -22,3 +22,9 @@ def test_yz_point_returns_y_and_z_only():
     from plot_wt02_kinematics_3d import yz_point
 
     assert yz_point((1.0, 2.0, 3.0)) == (2.0, 3.0)
+
+
+def test_mirrored_y_limits_reverse_horizontal_axis():
+    from plot_wt02_kinematics_3d import mirrored_y_limits
+
+    assert mirrored_y_limits(((-0.2, 0.5), (0.0, 1.8))) == ((0.5, -0.2), (0.0, 1.8))
