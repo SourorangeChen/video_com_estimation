@@ -284,8 +284,8 @@
 <!-- ===================== 2. 视频处理流程 PCT + CoM ===================== -->
 <section id="vid-proc">
   <div class="wrap">
-    <div class="sec-head"><span class="sec-num">02</span><h2>视频处理流程 · PCT 姿态估计 + CoM 计算</h2></div>
-    <p class="sec-desc">从完整录像切段，经人体检测与姿态估计得到 17 个 COCO 关键点，再用 7 段人体模型计算 2D 重心。</p>
+    <div class="sec-head"><span class="sec-num">02</span><h2>视频处理流程 · PCT 姿态估计 + keypoints 预处理 + CoM 计算</h2></div>
+    <p class="sec-desc">从完整录像切段，经人体检测与姿态估计得到 17 个 COCO 关键点；先对 keypoints 做 median + Savitzky-Golay 预处理，再用 7 段人体模型计算 2D 重心。</p>
 
     <div class="flow">
       <div class="node video">
@@ -303,16 +303,23 @@
       <div class="arrow"></div>
 
       <div class="node proc">
-        <div class="label">Step 3 · 7 段人体模型</div>
+        <div class="label">Step 3 · keypoints preprocessing</div>
+        <div class="title">median(3) + Savitzky-Golay(7,2)</div>
+        <div class="note">按 trial 平滑 17 个关键点的 x/y 坐标，降低逐帧抖动</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="node proc">
+        <div class="label">Step 4 · 7 段人体模型</div>
         <div class="title"><code>compute_frame_com()</code></div>
-        <div class="note">按各段质量比加权平均关键点 → 2D 重心（缺关键点则返回 None）</div>
+        <div class="note">按各段质量比加权平均预处理后的关键点 → 2D 重心（缺关键点则返回 None）</div>
       </div>
       <div class="arrow labeled" data-label="逐帧汇总"></div>
 
       <div class="node out">
         <div class="label">Output</div>
         <div class="title"><code>keypoints_and_com.json</code></div>
-        <div class="note">每帧：image 路径 + 17 关键点 + <code>com{com_x, com_y}</code> 像素坐标</div>
+        <div class="note">每帧：image 路径 + 预处理后的 17 关键点 + <code>com{com_x, com_y}</code> 像素坐标</div>
       </div>
     </div>
 
@@ -333,14 +340,14 @@
 <section id="vid-metric">
   <div class="wrap">
     <div class="sec-head"><span class="sec-num">03</span><h2>视频运动学指标计算（逐帧）</h2></div>
-    <p class="sec-desc">在 2D 像素重心基础上，每帧用鼻-踝身高换算缩放，计算摆长 l、CoM 位置、速度、自然频率 ω₀ 与外推重心 xCoM（倒立摆 + Hof 模型）。</p>
+    <p class="sec-desc">当前视频分支先对 17 个关键点做 median + Savitzky-Golay 预处理，并用预处理后的关键点重新计算 2D CoM；随后每帧用两肩关键点距离换算缩放，计算摆长 l、CoM 位置、速度、自然频率 ω₀ 与外推重心 xCoM（倒立摆 + Hof 模型）。</p>
 
     <div class="metric-box video">
-      <h3><span class="dot video"></span>视频 · video_com_metric.py</h3>
+      <h3><span class="dot video"></span>视频 · compute_keypoints_smooth_video_metric.py</h3>
       <div class="body">
-        <div class="step"><div class="s-num">1</div><div class="s-body"><strong>像素→米缩放</strong>（每帧独立，消除透视）<span class="formula">ppm = (ground_y − nose_y) / 1.70 m</span></div></div>
-        <div class="step"><div class="s-num">2</div><div class="s-body"><strong>摆长 l</strong>（重心离地高度）<span class="formula">l_m = (ground_y − com_y) / ppm</span></div></div>
-        <div class="step"><div class="s-num">3</div><div class="s-body"><strong>CoM 位置</strong>（向上为正）<span class="formula">com_y_m_up = −com_y_px / ppm</span></div></div>
+        <div class="step"><div class="s-num">1</div><div class="s-body"><strong>像素→米缩放</strong>（每帧独立，两肩宽参考 0.34 m）<span class="formula">shoulder_width_px = ||left_shoulder − right_shoulder||</span><span class="formula">ppm = shoulder_width_px / 0.34 m</span></div></div>
+        <div class="step"><div class="s-num">2</div><div class="s-body"><strong>摆长 l</strong>（重心离地高度；视频 y 轴向下，取更靠近地面的踝点）<span class="formula">ground_y = max(left_ankle_y, right_ankle_y)</span><span class="formula">l_m = (ground_y − com_y) / ppm</span></div></div>
+        <div class="step"><div class="s-num">3</div><div class="s-body"><strong>CoM 位置</strong>（向上为正）<span class="formula">com_x_m = com_x_px / ppm</span><span class="formula">com_y_m_up = −com_y_px / ppm</span></div></div>
         <div class="step"><div class="s-num">4</div><div class="s-body"><strong>速度</strong>（向后差分 × 帧率）<span class="formula">v = Δr · fps</span></div></div>
         <div class="step"><div class="s-num">5</div><div class="s-body"><strong>自然频率</strong> <span class="formula">ω₀ = √(g / l_m)</span></div></div>
         <div class="step"><div class="s-num">6</div><div class="s-body"><strong>外推重心 xCoM</strong> <span class="formula">xCoM = CoM + v / ω₀</span></div></div>
@@ -349,7 +356,7 @@
 
     <div class="flow" style="margin-top:24px;">
       <div class="arrow labeled" data-label="逐帧写出"></div>
-      <div class="node out"><div class="label">Output</div><div class="title"><code>video_com_metric.csv</code></div><div class="note">每帧：位移 / 速度 / l / ω₀ / xCoM（米制，向上为正）</div></div>
+      <div class="node out"><div class="label">Output</div><div class="title"><code>validation/metrics_keypoints_preprocessed/video_com_metric.csv</code></div><div class="note">每帧：scale_method=shoulder_width、位移 / 速度 / l / ω₀ / xCoM（米制，向上为正）</div></div>
     </div>
   </div>
 </section>
@@ -476,7 +483,7 @@
       <div class="node out"><div class="label">Output</div><div class="title"><code>vicon_com_metric.csv</code></div><div class="note">每帧：三维位移 / 速度 / l / ω₀ / xCoM（米制）</div></div>
     </div>
 
-    <div class="callout"><strong>视频 vs Vicon 关键差异：</strong>视频是 2D（像素，需每帧用鼻-踝身高换算缩放）、速度用向后差分；Vicon 是 3D（毫米，直接读取）、速度用 <code>np.gradient</code> 中心差分（误差 O(Δt²)，更精确）。ω₀ 与 xCoM 公式完全相同。</div>
+    <div class="callout"><strong>视频 vs Vicon 关键差异：</strong>视频是 2D（像素，当前用两肩距离 / 0.34 m 换算缩放）、速度用向后差分；Vicon 是 3D（毫米，直接读取）、速度用 <code>np.gradient</code> 中心差分（误差 O(Δt²)，更精确）。ω₀ 与 xCoM 公式完全相同。</div>
   </div>
 </section>
 
@@ -502,7 +509,7 @@
       <div class="node proc"><div class="label">Step 1 · 截重叠窗口</div><div class="title">取两路时间交集</div><div class="note"><code>t_min = max(start)</code> ~ <code>t_max = min(end)</code>，截掉 &gt;20% 记 warning</div></div>
       <div class="arrow"></div>
 
-      <div class="node proc"><div class="label">Step 2 · 插值（核心）</div><div class="title"><code>np.interp</code> 线性插值</div><div class="note">方向 <strong>Vicon → 视频</strong>：对每个视频时间点，在左右最近的两个 Vicon 帧间线性内插<br>（Vicon 密集，最大误差 ≈2 ms；插值后两路等长，方可逐点比较）</div></div>
+      <div class="node proc"><div class="label">Step 2 · 插值（核心）</div><div class="title"><code>np.interp</code> 线性插值</div><div class="note">方向 <strong>视频 → Vicon 时间轴</strong>：在相邻两个视频帧之间插入/估计新的视频值，使这些估计点的时间与 Vicon 帧时间一致。对某个 Vicon 时刻 <code>t_vicon</code>，找到它左右相邻的两个视频时刻 <code>t0, t1</code>，再按时间比例估计该时刻的视频值：<br><code>video(t_vicon)=video0+(video1−video0)·(t_vicon−t0)/(t1−t0)</code><br>例如 Vicon 帧在 0.168 s，视频相邻帧在 0.167 s 和 0.200 s，则用这两个视频帧之间的比例估计 0.168 s 的视频 CoM。这样处理后，视频序列被补到 Vicon 对应时间点，两路信号才能在同一时刻逐点比较 r / nRMSE / xcorr。</div></div>
       <div class="arrow"></div>
 
       <div class="node proc"><div class="label">Step 3 · 符号对齐</div><div class="title">翻转 Vicon Y、Z</div><div class="note"><code>vicon_Y → −vicon_Y</code>，<code>vicon_Z → −vicon_Z</code></div></div>
@@ -557,18 +564,18 @@
 <section id="viz" style="border-bottom:none;">
   <div class="wrap">
     <div class="sec-head"><span class="sec-num">09</span><h2>运动学指标对比可视化</h2></div>
-    <p class="sec-desc">两个 metric CSV 驱动一系列 WT02 可视化脚本：单路向量图、时间对齐并排图、运动学时间序列对比。</p>
+    <p class="sec-desc">当前分支由预处理后的 keypoints metric CSV 驱动 WT02 可视化：视频 CoM/xCoM 向量图、时间对齐视频-Vicon 对比图、delta / detrended / xcorr / lag-corrected 时间序列对比。</p>
 
     <div class="flow">
       <div class="branch">
-        <div class="branch-col"><div class="node out"><div class="label">来源</div><div class="title"><code>video_com_metric.csv</code></div></div></div>
+        <div class="branch-col"><div class="node out"><div class="label">来源</div><div class="title"><code>metrics_keypoints_preprocessed/video_com_metric.csv</code></div></div></div>
         <div class="branch-col"><div class="node out"><div class="label">来源</div><div class="title"><code>vicon_com_metric.csv</code></div></div></div>
       </div>
       <div class="arrow labeled" data-label="按时间戳匹配 argmin|t_video − t_vicon|"></div>
       <div class="branch">
-        <div class="branch-col"><div class="node proc"><div class="label">单路向量图</div><div class="title">3D / 2D 骨架 + CoM/xCoM</div><div class="note">plot_wt02_kinematics_3d · plot_wt02_video_metrics_2d（前 50 帧）</div></div></div>
+        <div class="branch-col"><div class="node proc"><div class="label">单路向量图</div><div class="title">WT02 前 100 帧视频 CoM/xCoM</div><div class="note"><code>metrics_keypoints_preprocessed/WT02_first100_video_metrics</code></div></div></div>
         <div class="branch-col"><div class="node proc"><div class="label">并排对齐图</div><div class="title">视频 + Vicon 100 对匹配帧</div><div class="note">plot_wt02_aligned_video_vicon_2d（文件名编码 dt）</div></div></div>
-        <div class="branch-col"><div class="node proc"><div class="label">时间序列对比</div><div class="title">位移 / 速度 / l / xCoM</div><div class="note">plot_wt02_aligned_timeseries（4 张曲线图）</div></div></div>
+        <div class="branch-col"><div class="node proc"><div class="label">时间序列对比</div><div class="title">CoM / xCoM / 位移 / 速度 / l</div><div class="note"><code>metrics_timeseries_validation_WT02_first100</code>：delta、detrended、xcorr、detrended-lag 图</div></div></div>
       </div>
     </div>
 
@@ -576,11 +583,12 @@
     <table class="tbl">
       <thead><tr><th>问题</th><th>当前处理</th><th>备注</th></tr></thead>
       <tbody>
-        <tr><td>像素-米换算误差</td><td>每帧用鼻-踝身高估算</td><td>透视形变、身体倾斜时误差增大</td></tr>
+        <tr><td>像素-米换算误差</td><td>每帧用两肩距离估算，参考肩宽 0.34 m</td><td>肩部旋转、遮挡、透视和左右肩检测误差会影响 ppm</td></tr>
         <tr><td>速度估计不一致</td><td>视频向后差分 / Vicon 中心差分</td><td>统一为中心差分可改善</td></tr>
         <tr><td>空间绝对比较</td><td>仅归一化趋势比较</td><td>像素级需相机标定投影矩阵</td></tr>
         <tr><td>运动学验证范围</td><td>仅 WT02 前 100 帧</td><td>待扩展到全部试验</td></tr>
-        <tr><td>参考身高固定</td><td>写死 1.70 m</td><td>应从受试者信息读取</td></tr>
+        <tr><td>参考肩宽固定</td><td>写死 0.34 m</td><td>应从受试者人体测量或标定数据读取</td></tr>
+        <tr><td>关键点预处理影响</td><td>median(3) + Savitzky-Golay(7,2)</td><td>可降低抖动，但可能平滑局部峰值；用 xcorr / lag 图检查时间滞后</td></tr>
       </tbody>
     </table>
   </div>
