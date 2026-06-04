@@ -110,7 +110,7 @@ def main() -> int:
     render_overview(
         video_selection,
         video_limits,
-        OUTPUT_DIR / "WT02_aligned_video_first50_overview_com_xcom_path.png",
+        OUTPUT_DIR / f"WT02_aligned_video_first{FRAME_COUNT}_overview_com_xcom_path.png",
     )
 
     # 逐帧出图，文件名标注视频/ Vicon 帧号与时间差(ms)。

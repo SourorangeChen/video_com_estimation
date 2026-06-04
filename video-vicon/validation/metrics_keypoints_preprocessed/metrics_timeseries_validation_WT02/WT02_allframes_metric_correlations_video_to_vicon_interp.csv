@@ -1,0 +1,7 @@
+metric,video_column,vicon_column,n_frames,pearson_r_raw,p_value_raw,rmse_raw,pearson_r_detrended_zscore,p_value_detrended_zscore,nrmse_detrended_zscore,xcorr_peak_r,xcorr_lag_frames,xcorr_lag_ms,time_axis,video_interpolation
+velocity,video_velocity_m_s,vicon_velocity_yz_m_s,954,0.14023,1.379488e-05,0.07432197968290961,0.10261,1.506040e-03,1.339694269028288,0.781379,-75,-300.0000000000003,Vicon time_s,linear video metric to Vicon time
+l,video_l_m,vicon_l_m,954,-0.382333,1.439254e-34,0.06254286190569014,-0.638794,1.626669e-110,1.8104111839715213,0.675635,217,868.0000000000008,Vicon time_s,linear video metric to Vicon time
+com_x_delta,video_com_x_delta_m,vicon_com_x_delta_m,954,-0.453707,1.281333e-49,1.077223795093264,0.010872,7.373527e-01,1.406505137061696,0.472556,216,864.0000000000008,Vicon time_s,linear video metric to Vicon time
+com_y_delta,video_com_y_delta_m,vicon_com_y_delta_m,954,-0.963221,0.000000e+00,1.6934669725423501,0.501505,6.672111e-62,0.9984941643805463,0.617915,-151,-604.0000000000006,Vicon time_s,linear video metric to Vicon time
+xcom_x_delta,video_xcom_x_delta_m,vicon_xcom_x_delta_m,954,-0.175364,4.990918e-08,1.0721688935470381,0.512539,5.027501e-65,0.987381830190738,0.62074,-25,-100.00000000000009,Vicon time_s,linear video metric to Vicon time
+xcom_y_delta,video_xcom_y_delta_m,vicon_xcom_y_delta_m,954,-0.710475,1.935518e-147,1.7115174789141039,0.835259,1.614544e-249,0.5740052384525794,0.836316,1,4.0000000000000036,Vicon time_s,linear video metric to Vicon time

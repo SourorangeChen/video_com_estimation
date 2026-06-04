@@ -86,13 +86,13 @@ to `vicon_com_kinematics.csv`. If only `vicon_com_kinematics.csv` exists, that f
 used automatically — no rename needed. Treat `vicon_com_metric.csv` /
 `vicon_com_kinematics.csv` as the canonical Vicon kinematics table.
 
-### 2. Video CoM kinematics
+### 2. Legacy video CoM kinematics
 
 ```powershell
 D:\Program\Anaconda3\python.exe video-vicon\code\video_com_metric.py
 ```
 
-Reads `keypoints_and_com.json`. Writes:
+Reads the legacy `keypoints_and_com.json`. Writes:
 
 ```text
 video-vicon/validation/video_com_metric.csv
@@ -100,6 +100,32 @@ video-vicon/validation/video_com_metric.csv
 
 Only frames whose `image` folder matches `Video_<trial>_Trajectory` and that have a
 `com` dict plus valid nose + both-ankle y are included.
+
+### 2a. Active keypoints-preprocessed video CoM kinematics
+
+The current active branch uses the keypoints-preprocessed JSON, not the legacy raw
+`Video_keypoint-com` JSON:
+
+```text
+video-vicon/data/Chenzixuan/Video/video_keypoints-preprocessed/results/keypoints_and_com_preprocessed.json
+```
+
+The JSON `com` field is the current input CoM: it is recomputed from preprocessed
+COCO-17 keypoints and then smoothed with a centered moving average. `source_com`
+keeps the CoM before CoM smoothing but after keypoint preprocessing.
+
+```powershell
+D:\Program\Anaconda3\python.exe video-vicon\code\compute_keypoints_smooth_video_metric.py
+```
+
+Writes:
+
+```text
+video-vicon/validation/metrics_keypoints_preprocessed/video_com_metric.csv
+```
+
+Only write to the user-requested output directory. Disable or ignore legacy/default
+side outputs when running one-off wrappers.
 
 ### 3. WT02 Vicon kinematics frames (3D + Y-Z 2D)
 
@@ -170,11 +196,24 @@ video_estimated_com.py            ← draw video CoM overlay frames
 
 ### Time alignment (current approach)
 
-Aligned plots pair each video frame to its **nearest-time** Vicon frame
-(`np.argmin(|vicon_time - video_time|)`), bounded to the Vicon time range. This is
-different from the older `validate_*_normalized.py` correlation pipeline, which linearly
-interpolates Vicon 250 Hz onto the video time base. Do not conflate the two when reading
-results.
+There are two different alignment methods in use. Do not conflate them.
+
+For first-100 frame visual examples, aligned plots pair each video frame to its
+**nearest-time** Vicon frame (`np.argmin(|vicon_time - video_time|)`), bounded to the
+Vicon time range. This does not interpolate values; it only chooses the nearest Vicon
+frame for file names and side-by-side display.
+
+For the current CoM z-score correlation analysis, the direction is **video -> Vicon
+time axis**. First crop to the overlapping time window. For every Vicon time point
+`t_vicon`, estimate the video value between the adjacent video frames:
+
+```text
+video(t_vicon) = video0 + (video1 - video0) * (t_vicon - t0) / (t1 - t0)
+```
+
+After this interpolation, video and Vicon have the same Vicon-time samples. xcorr lag
+is therefore reported in Vicon frames and converted with 250 Hz (`lag_ms = lag_frames /
+250 * 1000`).
 
 ## Vicon Metrics
 
@@ -222,19 +261,37 @@ Z (m)
 
 Video metrics are 2D projection metrics, not true 3D metrics.
 
-Inputs come from:
+Legacy inputs come from:
 
 ```text
 video-vicon/data/Chenzixuan/Video/Video_keypoint-com/results/keypoints_and_com.json
 ```
 
-The video scale estimate currently uses nose-to-ankle height per frame:
+The active keypoints-preprocessed branch uses:
 
 ```text
-reference_height_m = 1.70
+video-vicon/data/Chenzixuan/Video/video_keypoints-preprocessed/results/keypoints_and_com_preprocessed.json
+```
+
+Current preprocessing and smoothing:
+
+```text
+keypoints: trial-wise median window 3, then Savitzky-Golay window 7 / polyorder 2
+CoM: recomputed from preprocessed keypoints, then centered moving average window 5
+```
+
+The current video scale estimate uses shoulder width per frame:
+
+```text
+reference_shoulder_width_m = 0.34
+shoulder_width_px = norm(left_shoulder - right_shoulder)
+pixels_per_meter = shoulder_width_px / 0.34
+```
+
+Ground height still uses the lower of the two ankle keypoints in image coordinates:
+
+```text
 ground_y_px = max(left_ankle_y_px, right_ankle_y_px)
-nose_to_ankle_height_px = ground_y_px - nose_y_px
-pixels_per_meter = nose_to_ankle_height_px / 1.70
 ```
 
 Video displacement is relative to the previous video frame:
@@ -281,9 +338,9 @@ The video metrics remain noisier than Vicon. Do not treat them as final validate
 
 Known causes:
 
-- `pixels_per_meter(t)` changes strongly frame to frame because it uses raw nose-to-ankle height.
+- `pixels_per_meter(t)` still changes frame to frame because it uses detected shoulder width.
 - `ground_y_px = max(left_ankle_y, right_ankle_y)` can switch between left and right foot during walking.
-- Nose and ankle keypoint jitter affects scale, `l`, velocity, and xCoM.
+- Shoulder and ankle keypoint jitter affects scale, `l`, velocity, and xCoM.
 - Velocity amplifies small CoM/keypoint errors because it differentiates position over a 30 Hz time step.
 - Video is a 2D projection; Vicon is 3D. For front/back view, compare video X/Y only against Vicon Y/Z projection, not Vicon full 3D velocity.
 
@@ -297,7 +354,7 @@ video frame-to-frame metrics vs Vicon metrics aggregated over matching video-fra
 
 Potential improvements:
 
-- Low-pass filter or Savitzky-Golay smooth video CoM before velocity/xCoM.
+- Test alternative CoM smoothing windows before velocity/xCoM.
 - Smooth `pixels_per_meter(t)` with a median or low-pass filter.
 - Use a stance-foot or smoothed ground estimate instead of raw `max(left_ankle_y, right_ankle_y)`.
 - Keep raw and filtered video metric CSVs separate for auditability.

@@ -277,7 +277,7 @@ def render_overview(selection: list[tuple[dict[str, Any], dict[str, Any]]], limi
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel("video X (px)")
     ax.set_ylabel("video Y (px, downward)")
-    ax.set_title("WT02 video first 50 frames | CoM and xCoM paths")
+    ax.set_title(f"WT02 video first {len(selection)} frames | CoM and xCoM paths")
     ax.grid(True, alpha=0.25)
     ax.legend(loc="lower right")
     fig.tight_layout()
